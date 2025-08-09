@@ -32,7 +32,10 @@ async function initSchema(db) {
     name TEXT NOT NULL,
     picture TEXT,
     role TEXT NOT NULL CHECK (role IN ('owner','client','admin')),
-    UNIQUE(name, picture)
+    email TEXT,
+    password_hash TEXT,
+    UNIQUE(name, picture),
+    UNIQUE(email)
   );
 
   CREATE TABLE IF NOT EXISTS properties (
@@ -89,6 +92,21 @@ async function initSchema(db) {
   `;
 
   await db.execAsync(schema);
+
+  // Ensure auth columns exist for old DBs created before email/password fields
+  try {
+    const cols = await db.allAsync("PRAGMA table_info('users')");
+    const names = new Set(cols.map(c => c.name));
+    if (!names.has('email')) {
+      await db.runAsync('ALTER TABLE users ADD COLUMN email TEXT');
+      await db.runAsync('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email)');
+    }
+    if (!names.has('password_hash')) {
+      await db.runAsync('ALTER TABLE users ADD COLUMN password_hash TEXT');
+    }
+  } catch (e) {
+    // ignore
+  }
 }
 
 function deterministicPrice(idOrTitle) {
