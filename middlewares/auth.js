@@ -30,4 +30,26 @@ function requireAdmin(req, res, next) {
   });
 }
 
-module.exports = { authenticate, requireAuth, requireAdmin };
+function requireRole(roles = []) {
+  const allowed = Array.isArray(roles) ? roles : [roles];
+  return function (req, res, next) {
+    requireAuth(req, res, () => {
+      if (!allowed.includes(req.user.role)) {
+        return res.status(403).json({ error: 'insufficient role' });
+      }
+      next();
+    });
+  };
+}
+
+function requireSelfOrAdmin(param = 'id') {
+  return function (req, res, next) {
+    requireAuth(req, res, () => {
+      const requestedId = String(req.params && req.params[param]);
+      if (req.user.role === 'admin' || String(req.user.id) === requestedId) return next();
+      return res.status(403).json({ error: 'forbidden' });
+    });
+  };
+}
+
+module.exports = { authenticate, requireAuth, requireAdmin, requireRole, requireSelfOrAdmin };

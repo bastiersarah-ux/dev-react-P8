@@ -35,7 +35,7 @@ async function register(db, { name, email, password, picture = null, role = 'cli
   if (!password || String(password).length < 6) {
     const err = new Error('password must be at least 6 characters'); err.status = 400; throw err;
   }
-  if (!['owner','client','admin'].includes(role)) role = 'client';
+  if (!['owner','client'].includes(role)) role = 'client';
   const password_hash = hashPassword(String(password));
   try {
     const r = await db.runAsync('INSERT INTO users(name, email, password_hash, picture, role) VALUES (?,?,?,?,?)', [name, email, password_hash, picture, role]);
@@ -59,9 +59,36 @@ async function login(db, { email, password }) {
   return { token, user: publicUser };
 }
 
+async function requestPasswordReset(db, { email }) {
+  if (!email) { const err = new Error('email is required'); err.status = 400; throw err; }
+  const user = await db.getAsync('SELECT id, email FROM users WHERE email = ?', [email]);
+  // Always respond with success to avoid user enumeration
+  const token = crypto.randomBytes(32).toString('hex');
+  const expires = Date.now() + 60 * 60 * 1000; // 1 hour
+  if (user) {
+    await db.runAsync('UPDATE users SET reset_token = ?, reset_expires = ? WHERE id = ?', [token, expires, user.id]);
+  }
+  const resp = { ok: true, message: 'If the email exists, a reset link has been sent.' };
+  if (process.env.NODE_ENV !== 'production') resp.token = token;
+  return resp;
+}
+
+async function resetPassword(db, { token, password }) {
+  if (!token || !password) { const err = new Error('token and password are required'); err.status = 400; throw err; }
+  if (String(password).length < 6) { const err = new Error('password must be at least 6 characters'); err.status = 400; throw err; }
+  const now = Date.now();
+  const user = await db.getAsync('SELECT id FROM users WHERE reset_token = ? AND IFNULL(reset_expires, 0) > ?', [token, now]);
+  if (!user) { const err = new Error('invalid or expired token'); err.status = 400; throw err; }
+  const password_hash = hashPassword(String(password));
+  await db.runAsync('UPDATE users SET password_hash = ?, reset_token = NULL, reset_expires = NULL WHERE id = ?', [password_hash, user.id]);
+  return { ok: true };
+}
+
 module.exports = {
   register,
   login,
+  requestPasswordReset,
+  resetPassword,
   hashPassword,
   verifyPassword,
   signToken,

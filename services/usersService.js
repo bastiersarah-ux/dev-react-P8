@@ -30,8 +30,47 @@ async function createUser(db, { name, picture = null, role = 'client' }) {
   }
 }
 
+async function updateUser(db, id, changes, { allowAdminRole = false } = {}) {
+  const allowedFields = ['name', 'picture', 'role'];
+  const fields = [];
+  const params = [];
+  for (const key of allowedFields) {
+    if (Object.prototype.hasOwnProperty.call(changes || {}, key)) {
+      if (key === 'role') {
+        const role = changes.role;
+        if (!['owner', 'client', 'admin'].includes(role)) {
+          const err = new Error('invalid role');
+          err.status = 400;
+          throw err;
+        }
+        if (role === 'admin' && !allowAdminRole) {
+          const err = new Error('forbidden to set admin role');
+          err.status = 403;
+          throw err;
+        }
+      }
+      fields.push(`${key} = ?`);
+      params.push(changes[key]);
+    }
+  }
+  if (fields.length === 0) {
+    const err = new Error('No fields to update');
+    err.status = 400;
+    throw err;
+  }
+  params.push(id);
+  const r = await db.runAsync(`UPDATE users SET ${fields.join(', ')} WHERE id = ?`, params);
+  if (r.changes === 0) {
+    const err = new Error('User not found');
+    err.status = 404;
+    throw err;
+  }
+  return await getUser(db, id);
+}
+
 module.exports = {
   listUsers,
   getUser,
   createUser,
+  updateUser,
 };

@@ -145,10 +145,16 @@ async function deleteProperty(db, id) {
   }
 }
 
+async function getPropertyOwnerId(db, id) {
+  const row = await db.getAsync('SELECT host_id FROM properties WHERE id = ?', [id]);
+  return row ? row.host_id : null;
+}
+
 module.exports = {
   listProperties,
   getPropertyDetails,
   createProperty,
   updateProperty,
   deleteProperty,
+  getPropertyOwnerId,
 };

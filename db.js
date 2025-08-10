@@ -93,7 +93,7 @@ async function initSchema(db) {
 
   await db.execAsync(schema);
 
-  // Ensure auth columns exist for old DBs created before email/password fields
+  // Ensure auth columns exist for old DBs created before email/password/reset fields
   try {
     const cols = await db.allAsync("PRAGMA table_info('users')");
     const names = new Set(cols.map(c => c.name));
@@ -103,6 +103,13 @@ async function initSchema(db) {
     }
     if (!names.has('password_hash')) {
       await db.runAsync('ALTER TABLE users ADD COLUMN password_hash TEXT');
+    }
+    if (!names.has('reset_token')) {
+      await db.runAsync('ALTER TABLE users ADD COLUMN reset_token TEXT');
+      await db.runAsync('CREATE INDEX IF NOT EXISTS idx_users_reset_token ON users(reset_token)');
+    }
+    if (!names.has('reset_expires')) {
+      await db.runAsync('ALTER TABLE users ADD COLUMN reset_expires INTEGER');
     }
   } catch (e) {
     // ignore

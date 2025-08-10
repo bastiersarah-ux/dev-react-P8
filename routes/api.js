@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 
 const dbReady = require('../middlewares/dbReady');
+const { requireRole, requireAdmin, requireSelfOrAdmin } = require('../middlewares/auth');
 const properties = require('../controllers/propertiesController');
 const users = require('../controllers/usersController');
 const ratings = require('../controllers/ratingsController');
@@ -12,14 +13,15 @@ router.use(dbReady);
 // Properties
 router.get('/properties', properties.list);
 router.get('/properties/:id', properties.getById);
-router.post('/properties', properties.create);
-router.patch('/properties/:id', properties.update);
-router.delete('/properties/:id', properties.remove);
+router.post('/properties', requireRole(['owner','admin']), properties.create);
+router.patch('/properties/:id', requireRole(['owner','admin']), properties.update);
+router.delete('/properties/:id', requireRole(['owner','admin']), properties.remove);
 
 // Users
-router.get('/users', users.list);
-router.get('/users/:id', users.getById);
-router.post('/users', users.create);
+router.get('/users', requireAdmin, users.list);
+router.get('/users/:id', requireSelfOrAdmin('id'), users.getById);
+router.post('/users', requireAdmin, users.create);
+router.patch('/users/:id', requireSelfOrAdmin('id'), users.update);
 
 // Ratings for properties
 router.get('/properties/:id/ratings', ratings.listForProperty);
