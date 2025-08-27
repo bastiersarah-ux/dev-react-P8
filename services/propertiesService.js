@@ -2,6 +2,7 @@ function mapPropertyRow(row) {
   if (!row) return null;
   return {
     id: row.id,
+    slug: row.slug,
     title: row.title,
     description: row.description,
     cover: row.cover,
@@ -15,6 +16,25 @@ function mapPropertyRow(row) {
 
 function genId() {
   return Math.random().toString(16).slice(2, 10);
+}
+
+function slugify(input) {
+  const s = String(input || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  const slug = s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').replace(/-{2,}/g, '-');
+  return slug || 'property';
+}
+
+async function ensureUniqueSlug(db, base, excludeId = null) {
+  let slug = base;
+  let n = 2;
+  // Loop until slug is unique
+  while (true) {
+    const row = excludeId
+      ? await db.getAsync('SELECT id FROM properties WHERE slug = ? AND id != ?', [slug, excludeId])
+      : await db.getAsync('SELECT id FROM properties WHERE slug = ?', [slug]);
+    if (!row) return slug;
+    slug = `${base}-${n++}`;
+  }
 }
 
 async function listProperties(db) {
@@ -87,9 +107,11 @@ async function createProperty(db, payload) {
   }
 
   const newId = id || genId();
+  const base = slugify(title);
+  const uniqueSlug = await ensureUniqueSlug(db, base);
   await db.runAsync(
-    'INSERT INTO properties(id, title, description, cover, location, host_id, price_per_night) VALUES (?,?,?,?,?,?,?)',
-    [newId, title, description, cover, location, resolvedHostId, price]
+    'INSERT INTO properties(id, title, slug, description, cover, location, host_id, price_per_night) VALUES (?,?,?,?,?,?,?,?)',
+    [newId, title, uniqueSlug, description, cover, location, resolvedHostId, price]
   );
 
   if (Array.isArray(pictures)) {
@@ -115,12 +137,24 @@ async function updateProperty(db, id, changes) {
   const allowed = ['title', 'description', 'cover', 'location', 'host_id', 'price_per_night'];
   const fields = [];
   const params = [];
+
+  let newSlug = null;
+  if (Object.prototype.hasOwnProperty.call(changes || {}, 'title')) {
+    const base = slugify(changes.title);
+    newSlug = await ensureUniqueSlug(db, base, id);
+  }
+
   for (const k of allowed) {
     if (k in (changes || {})) {
       fields.push(`${k} = ?`);
       params.push(changes[k]);
     }
   }
+  if (newSlug) {
+    fields.push('slug = ?');
+    params.push(newSlug);
+  }
+
   if (fields.length === 0) {
     const err = new Error('No fields to update');
     err.status = 400;

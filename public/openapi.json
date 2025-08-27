@@ -13,7 +13,9 @@
     { "name": "Auth" },
     { "name": "Properties" },
     { "name": "Users" },
-    { "name": "Ratings" }
+    { "name": "Ratings" },
+    { "name": "Favorites" },
+    { "name": "Uploads" }
   ],
   "paths": {
     "/auth/register": {
@@ -256,6 +258,110 @@
           "404": { "description": "Property or User not found", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
         }
       }
+    },
+    "/api/properties/{id}/favorite": {
+      "post": {
+        "tags": ["Favorites"],
+        "summary": "Add property to favorites (current user)",
+        "security": [ { "BearerAuth": [] } ],
+        "parameters": [ { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } } ],
+        "responses": {
+          "200": { "description": "Added (idempotent)", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Ok" } } } },
+          "401": { "description": "Authentication required", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "404": { "description": "Property not found", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      },
+      "delete": {
+        "tags": ["Favorites"],
+        "summary": "Remove property from favorites (current user)",
+        "security": [ { "BearerAuth": [] } ],
+        "parameters": [ { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } } ],
+        "responses": {
+          "200": { "description": "Removed (idempotent)", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Ok" } } } },
+          "401": { "description": "Authentication required", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/api/users/{id}/favorites": {
+      "get": {
+        "tags": ["Favorites"],
+        "summary": "List favorites for a user (self or admin)",
+        "security": [ { "BearerAuth": [] } ],
+        "parameters": [ { "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } } ],
+        "responses": {
+          "200": { "description": "Array of properties", "content": { "application/json": { "schema": { "type": "array", "items": { "$ref": "#/components/schemas/PropertyBase" } } } } },
+          "401": { "description": "Authentication required", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "403": { "description": "Forbidden (self or admin)", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "404": { "description": "User not found", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/api/uploads/image": {
+      "post": {
+        "tags": ["Uploads"],
+        "summary": "Upload an image and get a URL",
+        "description": "Process: 1) Upload an image to get a public URL. 2) Use the returned URL depending on the purpose: property-cover -> PATCH /api/properties/{id} with {\n\t\"cover\": \"<url>\" }, property-picture -> include the URL in the pictures array when creating a property, user-picture -> PATCH /api/users/{id} with { \"picture\": \"<url>\" }.",
+        "security": [ { "BearerAuth": [] } ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "file": { "type": "string", "format": "binary", "description": "Image file" },
+                  "purpose": { "type": "string", "enum": ["property-cover", "property-picture", "user-picture", "other"], "description": "Optional: helps the API return tailored instructions" },
+                  "property_id": { "type": "string", "description": "Optional: property id when purpose relates to a property (validates existence)" }
+                },
+                "required": ["file"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": { "description": "Uploaded", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/UploadResponse" } } } },
+          "400": { "description": "Validation error (non-image or missing file)", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "401": { "description": "Authentication required", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "403": { "description": "Forbidden (owner or admin only)", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "404": { "description": "Property not found for provided property_id", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "500": { "description": "Upload not available (multer missing)", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/api/uploads/images": {
+      "delete": {
+        "tags": ["Uploads"],
+        "summary": "Supprimer une ou plusieurs images",
+        "description": "Fournissez des noms de fichiers (ex: \"abc.jpg\") ou des URLs (ex: \"/uploads/abc.jpg\"). L'API supprimera les fichiers et nettoiera les références en base (properties.cover, property_pictures.url, users.picture).",
+        "security": [ { "BearerAuth": [] } ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "filenames": { "type": "array", "items": { "type": "string" }, "description": "Liste de noms de fichiers dans /uploads" },
+                  "urls": { "type": "array", "items": { "type": "string" }, "description": "Liste d'URLs commençant par /uploads/" },
+                  "filename": { "type": "string" },
+                  "url": { "type": "string" }
+                }
+              },
+              "examples": {
+                "singleFilename": { "summary": "Un seul fichier", "value": { "filename": "1692971234-a1b2c3d4.jpg" } },
+                "multipleUrls": { "summary": "Plusieurs URLs", "value": { "urls": ["/uploads/1692971234-a1b2c3d4.jpg", "/uploads/1692971299-ffeedd.png"] } }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Tous supprimés", "content": { "application/json": { "schema": { "type": "object", "properties": { "ok": {"type":"boolean"}, "deleted": {"type":"array", "items": {"type":"string"}}, "not_found": {"type":"array", "items": {"type":"string"}}, "errors": {"type":"array", "items": {"type":"object", "properties": {"filename": {"type":"string"}, "error": {"type":"string"}}}}, "results": {"type":"array", "items": {"type":"object"}} } } } } },
+          "207": { "description": "Partiellement supprimés (Multi-Status)", "content": { "application/json": { "schema": { "type": "object" } } } },
+          "400": { "description": "Requête invalide (aucun élément fourni)", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "401": { "description": "Authentification requise", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "403": { "description": "Interdit (owner ou admin seulement)", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
     }
   },
   "components": {
@@ -341,9 +447,10 @@
         "type": "object",
         "properties": {
           "id": { "type": "string" },
+          "slug": { "type": "string", "readOnly": true, "description": "Slug unique lisible pour l'affichage" },
           "title": { "type": "string" },
           "description": { "type": "string", "nullable": true },
-          "cover": { "type": "string", "nullable": true },
+          "cover": { "type": "string", "nullable": true, "description": "URL vers l'image de couverture. Pour envoyer un fichier, utilisez /api/uploads/image puis placez l'URL renvoyée ici." },
           "location": { "type": "string", "nullable": true },
           "price_per_night": { "type": "number" },
           "rating_avg": { "type": "number" },
@@ -358,7 +465,7 @@
           {
             "type": "object",
             "properties": {
-              "pictures": { "type": "array", "items": { "type": "string" } },
+              "pictures": { "type": "array", "description": "Liste d'URLs d'images.", "items": { "type": "string" } },
               "equipments": { "type": "array", "items": { "type": "string" } },
               "tags": { "type": "array", "items": { "type": "string" } }
             }
@@ -371,7 +478,7 @@
           "id": { "type": "string", "description": "Optional custom id (string)" },
           "title": { "type": "string" },
           "description": { "type": "string" },
-          "cover": { "type": "string" },
+          "cover": { "type": "string", "description": "URL vers l'image de couverture. Pour envoyer un fichier, utilisez /api/uploads/image puis placez l'URL renvoyée ici." },
           "location": { "type": "string" },
           "price_per_night": { "type": "number" },
           "host_id": { "type": "integer", "description": "Existing host id" },
@@ -382,7 +489,7 @@
               "picture": { "type": "string" }
             }
           },
-          "pictures": { "type": "array", "items": { "type": "string" } },
+          "pictures": { "type": "array", "description": "Liste d'URLs d'images. Pour envoyer un fichier, utilisez /api/uploads/image puis utilisez l'URL renvoyée.", "items": { "type": "string" } },
           "equipments": { "type": "array", "items": { "type": "string" } },
           "tags": { "type": "array", "items": { "type": "string" } }
         },
@@ -393,7 +500,7 @@
         "properties": {
           "title": { "type": "string" },
           "description": { "type": "string" },
-          "cover": { "type": "string" },
+          "cover": { "type": "string", "description": "URL vers l'image de couverture. Pour envoyer un fichier, utilisez /api/uploads/image puis placez l'URL renvoyée ici." },
           "location": { "type": "string" },
           "host_id": { "type": "integer" },
           "price_per_night": { "type": "number" }
@@ -428,6 +535,19 @@
           "ratings": { "type": "array", "items": { "$ref": "#/components/schemas/Rating" } }
         },
         "required": ["rating_avg", "ratings_count", "ratings"]
+      },
+      "UploadResponse": {
+        "type": "object",
+        "properties": {
+          "url": { "type": "string", "description": "Public URL to the uploaded image" },
+          "filename": { "type": "string" },
+          "size": { "type": "integer" },
+          "mimetype": { "type": "string" },
+          "purpose": { "type": "string", "enum": ["property-cover", "property-picture", "user-picture", "other"], "nullable": true },
+          "property_id": { "type": "string", "nullable": true },
+          "instructions": { "type": "string", "description": "Human-readable guidance on how to use the uploaded image URL next" }
+        },
+        "required": ["url"]
       }
     }
   }

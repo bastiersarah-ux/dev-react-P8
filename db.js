@@ -41,6 +41,7 @@ async function initSchema(db) {
   CREATE TABLE IF NOT EXISTS properties (
     id TEXT PRIMARY KEY,
     title TEXT NOT NULL,
+    slug TEXT NOT NULL UNIQUE,
     description TEXT,
     cover TEXT,
     location TEXT,
@@ -86,6 +87,15 @@ async function initSchema(db) {
     FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
   );
 
+  CREATE TABLE IF NOT EXISTS favorites (
+    user_id INTEGER NOT NULL,
+    property_id TEXT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (user_id, property_id),
+    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY(property_id) REFERENCES properties(id) ON DELETE CASCADE
+  );
+
   CREATE INDEX IF NOT EXISTS idx_properties_host ON properties(host_id);
   CREATE INDEX IF NOT EXISTS idx_ratings_property ON ratings(property_id);
   CREATE INDEX IF NOT EXISTS idx_ratings_user ON ratings(user_id);
@@ -114,6 +124,31 @@ async function initSchema(db) {
   } catch (e) {
     // ignore
   }
+
+  // Ensure slug column exists and is populated for properties
+  try {
+    const pcols = await db.allAsync("PRAGMA table_info('properties')");
+    const pnames = new Set(pcols.map(c => c.name));
+    if (!pnames.has('slug')) {
+      await db.runAsync('ALTER TABLE properties ADD COLUMN slug TEXT');
+      // Backfill slugs from titles
+      const rows = await db.allAsync('SELECT id, title FROM properties');
+      const used = new Set();
+      for (const row of rows) {
+        const base = slugify(row.title || row.id || 'property');
+        let slug = base;
+        let n = 2;
+        while (used.has(slug)) {
+          slug = `${base}-${n++}`;
+        }
+        used.add(slug);
+        await db.runAsync('UPDATE properties SET slug = ? WHERE id = ?', [slug, row.id]);
+      }
+      await db.runAsync('CREATE UNIQUE INDEX IF NOT EXISTS idx_properties_slug ON properties(slug)');
+    }
+  } catch (e) {
+    // ignore
+  }
 }
 
 function deterministicPrice(idOrTitle) {
@@ -122,6 +157,12 @@ function deterministicPrice(idOrTitle) {
   let h = 0;
   for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
   return 45 + (h % 256); // 45..300
+}
+
+function slugify(input) {
+  const s = String(input || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  const slug = s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').replace(/-{2,}/g, '-');
+  return slug || 'property';
 }
 
 async function seedIfEmpty(db) {
@@ -141,6 +182,7 @@ async function seedIfEmpty(db) {
   await new Promise((resolve, reject) => {
     db.serialize(async () => {
       try {
+        const usedSlugs = new Set();
         for (const p of data) {
           const hostName = p.host && p.host.name ? p.host.name : 'Unknown';
           const hostPic = p.host && p.host.picture ? p.host.picture : null;
@@ -152,12 +194,21 @@ async function seedIfEmpty(db) {
             user = { id: ins.lastID };
           }
 
+          // Prepare slug
+          const base = slugify(p.title || p.id || hostName);
+          let slug = base;
+          let n = 2;
+          while (usedSlugs.has(slug)) {
+            slug = `${base}-${n++}`;
+          }
+          usedSlugs.add(slug);
+
           // Insert property
           const price = deterministicPrice(p.id || p.title || hostName);
           const ratingAvg = p.rating ? Number(p.rating) : 0;
           await db.runAsync(
-            'INSERT OR IGNORE INTO properties(id, title, description, cover, location, host_id, rating_avg, price_per_night) VALUES (?,?,?,?,?,?,?,?)',
-            [p.id, p.title, p.description || null, p.cover || null, p.location || null, user.id, ratingAvg, price]
+            'INSERT OR IGNORE INTO properties(id, title, slug, description, cover, location, host_id, rating_avg, price_per_night) VALUES (?,?,?,?,?,?,?,?,?)',
+            [p.id, p.title, slug, p.description || null, p.cover || null, p.location || null, user.id, ratingAvg, price]
           );
 
           // Pictures (ensure cover included)

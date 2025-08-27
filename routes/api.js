@@ -2,10 +2,12 @@ const express = require('express');
 const router = express.Router();
 
 const dbReady = require('../middlewares/dbReady');
-const { requireRole, requireAdmin, requireSelfOrAdmin } = require('../middlewares/auth');
+const { requireRole, requireAdmin, requireSelfOrAdmin, requireAuth } = require('../middlewares/auth');
 const properties = require('../controllers/propertiesController');
 const users = require('../controllers/usersController');
 const ratings = require('../controllers/ratingsController');
+const favorites = require('../controllers/favoritesController');
+const uploads = require('../controllers/uploadsController');
 
 // Ensure DB is ready for all API routes
 router.use(dbReady);
@@ -26,5 +28,16 @@ router.patch('/users/:id', requireSelfOrAdmin('id'), users.update);
 // Ratings for properties
 router.get('/properties/:id/ratings', ratings.listForProperty);
 router.post('/properties/:id/ratings', ratings.add);
+
+// Favorites
+router.post('/properties/:id/favorite', requireAuth, favorites.addForProperty);
+router.delete('/properties/:id/favorite', requireAuth, favorites.removeForProperty);
+router.get('/users/:id/favorites', requireSelfOrAdmin('id'), favorites.listForUser);
+
+// Uploads
+router.post('/uploads/image', requireRole(['owner','admin']), uploads.uploadImage);
+
+// Delete one or multiple uploaded images by filename or URL
+router.delete('/uploads/images', requireRole(['owner','admin']), uploads.deleteImages);
 
 module.exports = router;
