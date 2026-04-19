@@ -24,9 +24,14 @@ LETSENCRYPT_EMAIL=${LETSENCRYPT_EMAIL:?"Définissez LETSENCRYPT_EMAIL dans .env"
 echo "[init] Domaine : ${DOMAIN}"
 echo "[init] Email   : ${LETSENCRYPT_EMAIL}"
 
-# --- Vérifier si le certificat existe déjà (via le volume monté localement) -
-CERT_DIR="$(podman volume inspect certbot-certs --format '{{.Mountpoint}}' 2>/dev/null || true)/live/${DOMAIN}"
-if [ -d "${CERT_DIR}" ]; then
+# --- Détecter le nom du volume (podman-compose ajoute le préfixe du projet) ---
+PROJECT_NAME=$(basename "$(pwd)" | tr '[:upper:]' '[:lower:]')
+CERTS_VOLUME=$(podman volume ls --format '{{.Name}}' 2>/dev/null | grep -E "^${PROJECT_NAME}[_-]certbot.certs$" | head -1 || true)
+: "${CERTS_VOLUME:=${PROJECT_NAME}_certbot-certs}"
+
+# --- Vérifier si le certificat existe déjà ----------------------------------
+CERT_MOUNTPOINT=$(podman volume inspect "${CERTS_VOLUME}" --format '{{.Mountpoint}}' 2>/dev/null || true)
+if [ -n "${CERT_MOUNTPOINT}" ] && [ -d "${CERT_MOUNTPOINT}/live/${DOMAIN}" ]; then
   echo "[init] Certificat déjà présent pour ${DOMAIN}. Démarrage normal..."
   $COMPOSE_CMD up --detach
   exit 0
@@ -34,14 +39,17 @@ fi
 
 # --- Créer un certificat auto-signé temporaire pour démarrer nginx ----------
 echo "[init] Création d'un certificat temporaire (auto-signé)..."
-$COMPOSE_CMD run --rm --entrypoint="" certbot sh -c "
-  apk add --quiet openssl 2>/dev/null || true
-  mkdir -p /etc/letsencrypt/live/${DOMAIN}
-  openssl req -x509 -nodes -newkey rsa:2048 -days 1 \
-    -keyout '/etc/letsencrypt/live/${DOMAIN}/privkey.pem' \
-    -out    '/etc/letsencrypt/live/${DOMAIN}/fullchain.pem' \
-    -subj   '/CN=localhost' 2>/dev/null
-"
+podman run --rm \
+  -v "${CERTS_VOLUME}:/etc/letsencrypt" \
+  --entrypoint="" \
+  docker.io/certbot/certbot sh -c "
+    apk add --quiet openssl 2>/dev/null || true
+    mkdir -p /etc/letsencrypt/live/${DOMAIN}
+    openssl req -x509 -nodes -newkey rsa:2048 -days 1 \\
+      -keyout '/etc/letsencrypt/live/${DOMAIN}/privkey.pem' \\
+      -out    '/etc/letsencrypt/live/${DOMAIN}/fullchain.pem' \\
+      -subj   '/CN=localhost' 2>/dev/null
+  "
 
 # --- Démarrer nginx avec le certificat temporaire ---------------------------
 echo "[init] Démarrage de nginx..."
