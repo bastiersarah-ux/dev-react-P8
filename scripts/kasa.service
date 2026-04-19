@@ -1,0 +1,26 @@
+[Unit]
+Description=Kasa API (podman compose)
+Documentation=https://github.com/containers/podman-compose
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+
+# Adapter le chemin vers le dossier du projet
+WorkingDirectory=/opt/kasa
+
+# Variables d'environnement chargées depuis .env
+EnvironmentFile=/opt/kasa/.env
+
+ExecStart=/usr/bin/podman compose up --detach --remove-orphans
+ExecStop=/usr/bin/podman compose down
+ExecReload=/usr/bin/podman compose restart
+
+# Relancer automatiquement si le service tombe
+Restart=on-failure
+RestartSec=10s
+
+[Install]
+WantedBy=multi-user.target

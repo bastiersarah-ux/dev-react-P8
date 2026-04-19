@@ -29,6 +29,12 @@ JWT_EXPIRES_IN=7d
 
 # Mot de passe par défaut injecté lors du seed (optionnel)
 SEED_DEFAULT_PASSWORD=Kasa@2026!
+
+# Domaine public (utilisé par nginx + Let's Encrypt)
+DOMAIN=votre-domaine.com
+
+# Email pour les notifications d'expiration Let's Encrypt
+LETSENCRYPT_EMAIL=votre-email@exemple.com
 `;
 
 fs.writeFileSync(ENV_PATH, content, 'utf-8');
