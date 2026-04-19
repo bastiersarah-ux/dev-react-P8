@@ -6,8 +6,9 @@
 # Usage : bash scripts/init-letsencrypt.sh
 # =============================================================================
 set -euo pipefail
+set -x  # verbose : affiche chaque commande avant exécution
 
-COMPOSE_CMD="podman compose"
+COMPOSE_CMD="podman-compose"
 
 # --- Charger .env ------------------------------------------------------------
 if [ -f .env ]; then
@@ -23,8 +24,9 @@ LETSENCRYPT_EMAIL=${LETSENCRYPT_EMAIL:?"Définissez LETSENCRYPT_EMAIL dans .env"
 echo "[init] Domaine : ${DOMAIN}"
 echo "[init] Email   : ${LETSENCRYPT_EMAIL}"
 
-# --- Vérifier si le certificat existe déjà ----------------------------------
-if $COMPOSE_CMD run --rm certbot test -d "/etc/letsencrypt/live/${DOMAIN}" 2>/dev/null; then
+# --- Vérifier si le certificat existe déjà (via le volume monté localement) -
+CERT_DIR="$(podman volume inspect certbot-certs --format '{{.Mountpoint}}' 2>/dev/null || true)/live/${DOMAIN}"
+if [ -d "${CERT_DIR}" ]; then
   echo "[init] Certificat déjà présent pour ${DOMAIN}. Démarrage normal..."
   $COMPOSE_CMD up --detach
   exit 0
