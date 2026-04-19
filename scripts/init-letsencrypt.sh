@@ -28,6 +28,8 @@ echo "[init] Email   : ${LETSENCRYPT_EMAIL}"
 PROJECT_NAME=$(basename "$(pwd)" | tr '[:upper:]' '[:lower:]')
 CERTS_VOLUME=$(podman volume ls --format '{{.Name}}' 2>/dev/null | grep -E "^${PROJECT_NAME}[_-]certbot.certs$" | head -1 || true)
 : "${CERTS_VOLUME:=${PROJECT_NAME}_certbot-certs}"
+WWW_VOLUME=$(podman volume ls --format '{{.Name}}' 2>/dev/null | grep -E "^${PROJECT_NAME}[_-]certbot.www$" | head -1 || true)
+: "${WWW_VOLUME:=${PROJECT_NAME}_certbot-www}"
 
 # --- Vérifier si le certificat existe déjà ----------------------------------
 CERT_MOUNTPOINT=$(podman volume inspect "${CERTS_VOLUME}" --format '{{.Mountpoint}}' 2>/dev/null || true)
@@ -58,7 +60,10 @@ sleep 3
 
 # --- Obtenir le vrai certificat via ACME HTTP-01 ----------------------------
 echo "[init] Obtention du certificat Let's Encrypt pour ${DOMAIN}..."
-$COMPOSE_CMD run --rm certbot certonly \
+podman run --rm \
+  -v "${CERTS_VOLUME}:/etc/letsencrypt" \
+  -v "${WWW_VOLUME}:/var/www/certbot" \
+  docker.io/certbot/certbot certonly \
   --webroot -w /var/www/certbot \
   --email "${LETSENCRYPT_EMAIL}" \
   --agree-tos --no-eff-email \
@@ -66,7 +71,7 @@ $COMPOSE_CMD run --rm certbot certonly \
 
 # --- Recharger nginx avec le vrai certificat --------------------------------
 echo "[init] Rechargement de nginx avec le certificat réel..."
-$COMPOSE_CMD exec nginx nginx -s reload
+podman exec kasa-nginx nginx -s reload
 
 # --- Démarrer toute la stack ------------------------------------------------
 echo "[init] Démarrage de la stack complète..."
