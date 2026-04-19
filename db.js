@@ -1,10 +1,13 @@
-const path = require('path');
-const fs = require('fs');
-const sqlite3 = require('sqlite3').verbose();
-const { promisify } = require('util');
+const path = require("path");
+const fs = require("fs");
+const sqlite3 = require("sqlite3").verbose();
+const { promisify } = require("util");
+const { hashPassword } = require("./services/authService");
 
-const DB_PATH = path.join(__dirname, 'data', 'kasa.sqlite3');
-const PROPS_JSON_PATH = path.join(__dirname, 'data', 'properties.json');
+const SEED_DEFAULT_PASSWORD = process.env.SEED_DEFAULT_PASSWORD || "Kasa@2026!";
+
+const DB_PATH = path.join(__dirname, "data", "kasa.sqlite3");
+const PROPS_JSON_PATH = path.join(__dirname, "data", "properties.json");
 
 function openDb() {
   const db = new sqlite3.Database(DB_PATH);
@@ -106,20 +109,24 @@ async function initSchema(db) {
   // Ensure auth columns exist for old DBs created before email/password/reset fields
   try {
     const cols = await db.allAsync("PRAGMA table_info('users')");
-    const names = new Set(cols.map(c => c.name));
-    if (!names.has('email')) {
-      await db.runAsync('ALTER TABLE users ADD COLUMN email TEXT');
-      await db.runAsync('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email)');
+    const names = new Set(cols.map((c) => c.name));
+    if (!names.has("email")) {
+      await db.runAsync("ALTER TABLE users ADD COLUMN email TEXT");
+      await db.runAsync(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email)",
+      );
     }
-    if (!names.has('password_hash')) {
-      await db.runAsync('ALTER TABLE users ADD COLUMN password_hash TEXT');
+    if (!names.has("password_hash")) {
+      await db.runAsync("ALTER TABLE users ADD COLUMN password_hash TEXT");
     }
-    if (!names.has('reset_token')) {
-      await db.runAsync('ALTER TABLE users ADD COLUMN reset_token TEXT');
-      await db.runAsync('CREATE INDEX IF NOT EXISTS idx_users_reset_token ON users(reset_token)');
+    if (!names.has("reset_token")) {
+      await db.runAsync("ALTER TABLE users ADD COLUMN reset_token TEXT");
+      await db.runAsync(
+        "CREATE INDEX IF NOT EXISTS idx_users_reset_token ON users(reset_token)",
+      );
     }
-    if (!names.has('reset_expires')) {
-      await db.runAsync('ALTER TABLE users ADD COLUMN reset_expires INTEGER');
+    if (!names.has("reset_expires")) {
+      await db.runAsync("ALTER TABLE users ADD COLUMN reset_expires INTEGER");
     }
   } catch (e) {
     // ignore
@@ -128,23 +135,28 @@ async function initSchema(db) {
   // Ensure slug column exists and is populated for properties
   try {
     const pcols = await db.allAsync("PRAGMA table_info('properties')");
-    const pnames = new Set(pcols.map(c => c.name));
-    if (!pnames.has('slug')) {
-      await db.runAsync('ALTER TABLE properties ADD COLUMN slug TEXT');
+    const pnames = new Set(pcols.map((c) => c.name));
+    if (!pnames.has("slug")) {
+      await db.runAsync("ALTER TABLE properties ADD COLUMN slug TEXT");
       // Backfill slugs from titles
-      const rows = await db.allAsync('SELECT id, title FROM properties');
+      const rows = await db.allAsync("SELECT id, title FROM properties");
       const used = new Set();
       for (const row of rows) {
-        const base = slugify(row.title || row.id || 'property');
+        const base = slugify(row.title || row.id || "property");
         let slug = base;
         let n = 2;
         while (used.has(slug)) {
           slug = `${base}-${n++}`;
         }
         used.add(slug);
-        await db.runAsync('UPDATE properties SET slug = ? WHERE id = ?', [slug, row.id]);
+        await db.runAsync("UPDATE properties SET slug = ? WHERE id = ?", [
+          slug,
+          row.id,
+        ]);
       }
-      await db.runAsync('CREATE UNIQUE INDEX IF NOT EXISTS idx_properties_slug ON properties(slug)');
+      await db.runAsync(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_properties_slug ON properties(slug)",
+      );
     }
   } catch (e) {
     // ignore
@@ -160,22 +172,28 @@ function deterministicPrice(idOrTitle) {
 }
 
 function slugify(input) {
-  const s = String(input || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-  const slug = s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').replace(/-{2,}/g, '-');
-  return slug || 'property';
+  const s = String(input || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+  const slug = s
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .replace(/-{2,}/g, "-");
+  return slug || "property";
 }
 
 async function seedIfEmpty(db) {
-  const row = await db.getAsync('SELECT COUNT(*) as c FROM properties');
+  const row = await db.getAsync("SELECT COUNT(*) as c FROM properties");
   if (row && row.c > 0) return; // already seeded
 
   if (!fs.existsSync(PROPS_JSON_PATH)) return;
-  const raw = fs.readFileSync(PROPS_JSON_PATH, 'utf-8');
+  const raw = fs.readFileSync(PROPS_JSON_PATH, "utf-8");
   let data;
   try {
     data = JSON.parse(raw);
   } catch (e) {
-    console.error('Failed to parse properties.json:', e.message);
+    console.error("Failed to parse properties.json:", e.message);
     return;
   }
 
@@ -184,13 +202,28 @@ async function seedIfEmpty(db) {
       try {
         const usedSlugs = new Set();
         for (const p of data) {
-          const hostName = p.host && p.host.name ? p.host.name : 'Unknown';
+          const hostName = p.host && p.host.name ? p.host.name : "Unknown";
           const hostPic = p.host && p.host.picture ? p.host.picture : null;
 
           // Ensure owner user exists
-          let user = await db.getAsync('SELECT id FROM users WHERE name = ? AND IFNULL(picture, "") = IFNULL(?, "")', [hostName, hostPic]);
+          let user = await db.getAsync(
+            'SELECT id FROM users WHERE name = ? AND IFNULL(picture, "") = IFNULL(?, "")',
+            [hostName, hostPic],
+          );
           if (!user) {
-            const ins = await db.runAsync('INSERT INTO users(name, picture, role) VALUES (?,?,?)', [hostName, hostPic, 'owner']);
+            // Générer un email et un mot de passe par défaut à partir du nom
+            const slugName = hostName
+              .toLowerCase()
+              .normalize("NFD")
+              .replace(/[\u0300-\u036f]/g, "")
+              .replace(/[^a-z0-9]+/g, ".")
+              .replace(/^\.+|\.+$/g, "");
+            const defaultEmail = `${slugName}@kasa.fr`;
+            const defaultHash = hashPassword(SEED_DEFAULT_PASSWORD);
+            const ins = await db.runAsync(
+              "INSERT INTO users(name, picture, role, email, password_hash) VALUES (?,?,?,?,?)",
+              [hostName, hostPic, "owner", defaultEmail, defaultHash],
+            );
             user = { id: ins.lastID };
           }
 
@@ -207,29 +240,49 @@ async function seedIfEmpty(db) {
           const price = deterministicPrice(p.id || p.title || hostName);
           const ratingAvg = p.rating ? Number(p.rating) : 0;
           await db.runAsync(
-            'INSERT OR IGNORE INTO properties(id, title, slug, description, cover, location, host_id, rating_avg, price_per_night) VALUES (?,?,?,?,?,?,?,?,?)',
-            [p.id, p.title, slug, p.description || null, p.cover || null, p.location || null, user.id, ratingAvg, price]
+            "INSERT OR IGNORE INTO properties(id, title, slug, description, cover, location, host_id, rating_avg, price_per_night) VALUES (?,?,?,?,?,?,?,?,?)",
+            [
+              p.id,
+              p.title,
+              slug,
+              p.description || null,
+              p.cover || null,
+              p.location || null,
+              user.id,
+              ratingAvg,
+              price,
+            ],
           );
 
           // Pictures (ensure cover included)
           const pics = new Set();
           if (p.cover) pics.add(p.cover);
-          if (Array.isArray(p.pictures)) p.pictures.forEach(u => u && pics.add(u));
+          if (Array.isArray(p.pictures))
+            p.pictures.forEach((u) => u && pics.add(u));
           for (const url of pics) {
-            await db.runAsync('INSERT OR IGNORE INTO property_pictures(property_id, url) VALUES (?,?)', [p.id, url]);
+            await db.runAsync(
+              "INSERT OR IGNORE INTO property_pictures(property_id, url) VALUES (?,?)",
+              [p.id, url],
+            );
           }
 
           // Equipments
           if (Array.isArray(p.equipments)) {
             for (const name of p.equipments) {
-              await db.runAsync('INSERT OR IGNORE INTO property_equipments(property_id, name) VALUES (?,?)', [p.id, name]);
+              await db.runAsync(
+                "INSERT OR IGNORE INTO property_equipments(property_id, name) VALUES (?,?)",
+                [p.id, name],
+              );
             }
           }
 
           // Tags
           if (Array.isArray(p.tags)) {
             for (const name of p.tags) {
-              await db.runAsync('INSERT OR IGNORE INTO property_tags(property_id, name) VALUES (?,?)', [p.id, name]);
+              await db.runAsync(
+                "INSERT OR IGNORE INTO property_tags(property_id, name) VALUES (?,?)",
+                [p.id, name],
+              );
             }
           }
         }

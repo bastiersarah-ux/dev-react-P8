@@ -1,2 +1,27 @@
-node_modules
-.idea
+# Dépendances
+node_modules/
+
+# Variables d'environnement
+.env
+.env.local
+.env.*.local
+
+# Base de données SQLite
+data/*.sqlite3
+
+# Fichiers uploadés
+public/uploads/*
+!public/uploads/.gitkeep
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# IDEs
+.idea/
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db

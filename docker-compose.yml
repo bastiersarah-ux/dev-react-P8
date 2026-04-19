@@ -1,0 +1,17 @@
+services:
+  api:
+    build: .
+    container_name: kasa-api
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      PORT: 3000
+      JWT_SECRET: ${JWT_SECRET:-change-me-in-prod}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
+      SEED_DEFAULT_PASSWORD: ${SEED_DEFAULT_PASSWORD:-Kasa@2026!}
+    volumes:
+      # Persistance de la base SQLite — accessible directement dans ./data/
+      - ./data:/app/data
+      # Persistance des fichiers uploadés — accessible directement dans ./public/uploads/
+      - ./public/uploads:/app/public/uploads
